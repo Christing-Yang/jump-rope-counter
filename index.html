@@ -278,13 +278,17 @@
         let countdownInterval = null;
         let motionDetectionInterval = null;
         let lastFrame = null;
-        let motionThreshold = 30;
         let canvasInterval = null;
         let showFinalResults = false;
         let finalCount = 0;
         let finalAverageSpeed = 0;
-        let startTime = null;
-        let elapsedSeconds = 0;
+        
+        // 跳绳检测参数
+        let jumpHistory = []; // 存储最近的运动强度
+        let jumpThreshold = 0.15; // 跳绳检测阈值
+        let minJumpInterval = 300; // 最小跳绳间隔（毫秒）
+        let lastJumpTime = 0;
+        let motionSensitivity = 0.8; // 运动敏感度
         
         // 初始化
         function init() {
@@ -319,8 +323,7 @@
                     customBtn.classList.remove('active');
                     totalDuration = parseInt(btn.dataset.seconds);
                     remainingTime = totalDuration;
-                    elapsedSeconds = 0;
-                    drawCanvas();
+                    updateCanvas();
                 });
             });
             
@@ -332,8 +335,7 @@
                     customBtn.classList.add('active');
                     totalDuration = customSeconds;
                     remainingTime = customSeconds;
-                    elapsedSeconds = 0;
-                    drawCanvas();
+                    updateCanvas();
                 } else {
                     alert('请输入1-3600之间的有效秒数');
                 }
@@ -350,7 +352,7 @@
         // 设置Canvas
         function setupCanvas() {
             function resizeCanvas() {
-                // 使用高分辨率Canvas
+                // 使用设备实际分辨率以获得最佳视频质量
                 const dpr = window.devicePixelRatio || 1;
                 canvas.width = canvas.offsetWidth * dpr;
                 canvas.height = canvas.offsetHeight * dpr;
@@ -372,7 +374,7 @@
                     stream = await navigator.mediaDevices.getUserMedia({
                         video: { 
                             facingMode: 'user',
-                            width: { ideal: 1280 },
+                            width: { ideal: 1280 }, // 提高分辨率
                             height: { ideal: 720 }
                         },
                         audio: false
@@ -388,12 +390,12 @@
                     // 初始化状态
                     count = 0;
                     remainingTime = totalDuration;
-                    elapsedSeconds = 0;
                     isCounting = true;
                     isPaused = false;
                     recordedChunks = [];
                     showFinalResults = false;
-                    startTime = Date.now();
+                    jumpHistory = [];
+                    lastJumpTime = 0;
                     
                     // 启动视频录制（如果支持）
                     if (MediaRecorder && MediaRecorder.isTypeSupported('video/mp4')) {
@@ -458,17 +460,17 @@
         function startCountdown() {
             if (totalDuration === 0) {
                 // 不限时模式 - 正向计时
+                let elapsedSeconds = 0;
                 countdownInterval = setInterval(() => {
-                    elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
-                    drawCanvas();
+                    elapsedSeconds++;
+                    updateCanvas(elapsedSeconds);
                 }, 1000);
             } else {
                 // 限时模式 - 倒计时
                 remainingTime = totalDuration;
                 countdownInterval = setInterval(() => {
                     remainingTime--;
-                    elapsedSeconds++;
-                    drawCanvas();
+                    updateCanvas();
                     
                     if (remainingTime <= 0) {
                         finishWorkout();
@@ -477,7 +479,7 @@
             }
             
             // 启动运动检测
-            motionDetectionInterval = setInterval(detectMotion, 200);
+            motionDetectionInterval = setInterval(detectJumpMotion, 100); // 更频繁的检测
             
             // 启动Canvas绘制
             if (canvasInterval) clearInterval(canvasInterval);
@@ -494,20 +496,17 @@
                 pauseBtn.textContent = '暂停';
                 pauseBtn.className = 'control-btn pause-btn';
                 
-                // 更新开始时间以补偿暂停时间
-                startTime = Date.now() - (elapsedSeconds * 1000);
-                
                 // 重启倒计时
                 if (totalDuration === 0) {
+                    let startTime = Date.now() - (count * 1000);
                     countdownInterval = setInterval(() => {
-                        elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
-                        drawCanvas();
+                        let elapsed = Math.floor((Date.now() - startTime) / 1000);
+                        updateCanvas(elapsed);
                     }, 1000);
                 } else {
                     countdownInterval = setInterval(() => {
                         remainingTime--;
-                        elapsedSeconds++;
-                        drawCanvas();
+                        updateCanvas();
                         if (remainingTime <= 0) {
                             finishWorkout();
                         }
@@ -515,7 +514,7 @@
                 }
                 
                 // 重启运动检测和Canvas绘制
-                motionDetectionInterval = setInterval(detectMotion, 200);
+                motionDetectionInterval = setInterval(detectJumpMotion, 100);
                 if (canvasInterval) clearInterval(canvasInterval);
                 canvasInterval = setInterval(drawCanvas, 100);
                 
@@ -580,8 +579,8 @@
             showFinalResults = false;
             count = 0;
             remainingTime = totalDuration;
-            elapsedSeconds = 0;
-            startTime = null;
+            jumpHistory = [];
+            lastJumpTime = 0;
             
             // 更新UI
             startBtn.disabled = false;
@@ -590,7 +589,7 @@
             pauseBtn.className = 'control-btn pause-btn';
             saveVideoBtn.style.display = 'none';
             
-            drawCanvas();
+            updateCanvas();
             
             // 清理资源
             cleanup();
@@ -609,102 +608,168 @@
             }
         }
         
-        // 运动检测
-        function detectMotion() {
+        // 优化的跳绳运动检测算法
+        function detectJumpMotion() {
             if (!isCounting || isPaused) return;
             
             try {
+                const now = Date.now();
+                
+                // 获取当前视频帧
                 const tempCanvas = document.createElement('canvas');
                 const tempCtx = tempCanvas.getContext('2d');
-                tempCanvas.width = video.videoWidth || 1280;
-                tempCanvas.height = video.videoHeight || 720;
-                tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
+                const videoWidth = video.videoWidth || 1280;
+                const videoHeight = video.videoHeight || 720;
+                tempCanvas.width = videoWidth;
+                tempCanvas.height = videoHeight;
+                tempCtx.drawImage(video, 0, 0, videoWidth, videoHeight);
                 
-                const currentFrame = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+                const currentFrame = tempCtx.getImageData(0, 0, videoWidth, videoHeight);
                 
                 if (lastFrame) {
-                    const diff = calculateFrameDifference(lastFrame, currentFrame);
-                    if (diff > motionThreshold) {
-                        count++;
-                        drawCanvas();
+                    // 计算运动强度 - 专注于下半身区域（跳绳主要动作区域）
+                    const motionIntensity = calculateJumpMotionIntensity(lastFrame, currentFrame, videoWidth, videoHeight);
+                    
+                    // 记录运动历史
+                    jumpHistory.push({
+                        intensity: motionIntensity,
+                        timestamp: now
+                    });
+                    
+                    // 保持最近10帧的历史
+                    if (jumpHistory.length > 10) {
+                        jumpHistory.shift();
+                    }
+                    
+                    // 跳绳检测逻辑
+                    if (motionIntensity > jumpThreshold) {
+                        // 检查是否满足跳绳的时间间隔
+                        if (now - lastJumpTime > minJumpInterval) {
+                            // 检查运动模式是否符合跳绳特征
+                            if (isJumpPatternValid()) {
+                                count++;
+                                lastJumpTime = now;
+                                updateCanvas();
+                            }
+                        }
                     }
                 }
                 
                 lastFrame = currentFrame;
             } catch (error) {
-                console.error('运动检测错误:', error);
+                console.error('跳绳检测错误:', error);
             }
         }
         
-        // 计算帧间差异
-        function calculateFrameDifference(frame1, frame2) {
-            let diff = 0;
-            const maxLength = Math.min(frame1.data.length, frame2.data.length);
-            const pixels = maxLength / 4;
-            const step = Math.max(1, Math.floor(pixels / 300));
+        // 计算跳绳运动强度（专注于下半身区域）
+        function calculateJumpMotionIntensity(frame1, frame2, width, height) {
+            let totalDiff = 0;
+            let pixelCount = 0;
             
-            for (let i = 0; i < maxLength; i += step * 4) {
-                const rDiff = Math.abs(frame1.data[i] - frame2.data[i]);
-                const gDiff = Math.abs(frame1.data[i + 1] - frame2.data[i + 1]);
-                const bDiff = Math.abs(frame1.data[i + 2] - frame2.data[i + 2]);
-                diff += (rDiff + gDiff + bDiff) / 3;
+            // 专注于下半身区域（跳绳时腿部和身体下部运动最明显）
+            const startY = Math.floor(height * 0.4); // 从40%高度开始
+            const endY = height;
+            const startX = Math.floor(width * 0.2); // 左右各留20%边距
+            const endX = Math.floor(width * 0.8);
+            
+            // 降低采样率以提高性能
+            const stepX = Math.max(2, Math.floor((endX - startX) / 50));
+            const stepY = Math.max(2, Math.floor((endY - startY) / 30));
+            
+            for (let y = startY; y < endY; y += stepY) {
+                for (let x = startX; x < endX; x += stepX) {
+                    const idx = (y * width + x) * 4;
+                    if (idx + 3 < frame1.data.length && idx + 3 < frame2.data.length) {
+                        const rDiff = Math.abs(frame1.data[idx] - frame2.data[idx]);
+                        const gDiff = Math.abs(frame1.data[idx + 1] - frame2.data[idx + 1]);
+                        const bDiff = Math.abs(frame1.data[idx + 2] - frame2.data[idx + 2]);
+                        const diff = (rDiff + gDiff + bDiff) / 3;
+                        totalDiff += diff;
+                        pixelCount++;
+                    }
+                }
             }
             
-            return diff / (pixels / step);
+            const averageDiff = pixelCount > 0 ? totalDiff / pixelCount : 0;
+            // 归一化到0-1范围
+            return Math.min(1, averageDiff / 255);
+        }
+        
+        // 验证跳绳模式是否有效
+        function isJumpPatternValid() {
+            if (jumpHistory.length < 3) return true;
+            
+            // 检查最近的运动强度是否有明显的峰值（跳绳特征）
+            const recentIntensities = jumpHistory.slice(-5).map(h => h.intensity);
+            const maxIntensity = Math.max(...recentIntensities);
+            const avgIntensity = recentIntensities.reduce((a, b) => a + b, 0) / recentIntensities.length;
+            
+            // 跳绳应该有明显的运动峰值
+            return maxIntensity > avgIntensity * 1.5;
+        }
+        
+        // 更新Canvas显示
+        function updateCanvas(elapsedSeconds = null) {
+            // 存储elapsedSeconds用于Canvas绘制
+            window.elapsedSecondsForDisplay = elapsedSeconds;
+            // 触发Canvas重绘
+            drawCanvas();
         }
         
         // 绘制Canvas
         function drawCanvas() {
             if (!video.videoWidth || !video.videoHeight) return;
             
-            // 获取设备像素比率
             const dpr = window.devicePixelRatio || 1;
+            const displayWidth = canvas.offsetWidth;
+            const displayHeight = canvas.offsetHeight;
             
             // 绘制视频帧
-            ctx.resetTransform();
-            ctx.scale(dpr, dpr);
-            ctx.drawImage(video, 0, 0, canvas.offsetWidth, canvas.offsetHeight);
+            ctx.clearRect(0, 0, displayWidth, displayHeight);
+            ctx.drawImage(video, 0, 0, displayWidth, displayHeight);
             
             // 添加半透明背景
             ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-            ctx.fillRect(0, 0, canvas.offsetWidth, 120);
+            ctx.fillRect(0, 0, displayWidth, 120);
             
             // 绘制跳绳次数
             ctx.font = 'bold 60px Arial';
             ctx.fillStyle = 'white';
             ctx.textAlign = 'center';
-            ctx.fillText(`跳绳: ${count}`, canvas.offsetWidth / 2, 60);
+            ctx.fillText(`跳绳: ${count}`, displayWidth / 2, 60);
             
             // 绘制时间信息
             ctx.font = 'bold 32px Arial';
             if (showFinalResults) {
                 // 显示最终结果
-                ctx.fillText(`最终成绩: ${finalCount} 次`, canvas.offsetWidth / 2, 100);
-            } else if (totalDuration === 0) {
+                ctx.fillText(`最终成绩: ${finalCount} 次`, displayWidth / 2, 100);
+            } else if (window.elapsedSecondsForDisplay !== undefined) {
                 // 不限时模式
-                const minutes = Math.floor(elapsedSeconds / 60);
-                const seconds = elapsedSeconds % 60;
-                ctx.fillText(`时间: ${minutes}:${seconds.toString().padStart(2, '0')}`, canvas.offsetWidth / 2, 100);
+                const minutes = Math.floor(window.elapsedSecondsForDisplay / 60);
+                const seconds = window.elapsedSecondsForDisplay % 60;
+                ctx.fillText(`时间: ${minutes}:${seconds.toString().padStart(2, '0')}`, displayWidth / 2, 100);
+            } else if (totalDuration === 0) {
+                ctx.fillText('时间: 0:00', displayWidth / 2, 100);
             } else {
                 // 限时模式 - 倒计时
                 if (remainingTime <= 0) {
-                    ctx.fillText('时间: 0:00', canvas.offsetWidth / 2, 100);
+                    ctx.fillText('时间: 0:00', displayWidth / 2, 100);
                 } else if (remainingTime < 60) {
-                    ctx.fillText(`倒计时: ${remainingTime}`, canvas.offsetWidth / 2, 100);
+                    ctx.fillText(`倒计时: ${remainingTime}`, displayWidth / 2, 100);
                 } else {
                     const minutes = Math.floor(remainingTime / 60);
                     const seconds = remainingTime % 60;
-                    ctx.fillText(`倒计时: ${minutes}:${seconds.toString().padStart(2, '0')}`, canvas.offsetWidth / 2, 100);
+                    ctx.fillText(`倒计时: ${minutes}:${seconds.toString().padStart(2, '0')}`, displayWidth / 2, 100);
                 }
             }
             
             // 如果是最终结果显示，持续显示在底部
             if (showFinalResults) {
                 ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-                ctx.fillRect(0, canvas.offsetHeight - 80, canvas.offsetWidth, 80);
+                ctx.fillRect(0, displayHeight - 80, displayWidth, 80);
                 ctx.font = 'bold 24px Arial';
                 ctx.fillStyle = 'white';
-                ctx.fillText(`总次数: ${finalCount} 次 | 平均速度: ${finalAverageSpeed} 次/分钟`, canvas.offsetWidth / 2, canvas.offsetHeight - 30);
+                ctx.fillText(`总次数: ${finalCount} 次 | 平均速度: ${finalAverageSpeed} 次/分钟`, displayWidth / 2, displayHeight - 30);
             }
         }
         
