@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>跳绳计数器</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            color: white;
+            overflow: hidden;
+        }
+        
+        .container {
+            width: 100%;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+        
+        .camera-container {
+            width: 100%;
+            height: 90vh;
+            background: rgba(0,0,0,0.3);
+            overflow: hidden;
+            position: relative;
+        }
+        
+        #video {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+        
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            pointer-events: none;
+        }
+        
+        .counter-display {
+            font-size: 80px;
+            font-weight: bold;
+            text-shadow: 0 4px 8px rgba(0,0,0,0.5);
+            margin-bottom: 10px;
+        }
+        
+        .time-display {
+            font-size: 40px;
+            font-weight: bold;
+            text-shadow: 0 4px 8px rgba(0,0,0,0.5);
+        }
+        
+        .controls-container {
+            width: 100%;
+            height: 10vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            gap: 8px;
+            padding: 5px;
+            background: rgba(0,0,0,0.3);
+        }
+        
+        .duration-buttons {
+            display: flex;
+            gap: 5px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        
+        .duration-btn {
+            padding: 6px 10px;
+            font-size: 12px;
+            border: none;
+            border-radius: 15px;
+            background: rgba(255,255,255,0.2);
+            color: white;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .duration-btn.active {
+            background: white;
+            color: #667eea;
+            font-weight: bold;
+        }
+        
+        .main-controls {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .control-btn {
+            padding: 8px 20px;
+            font-size: 14px;
+            border: none;
+            border-radius: 20px;
+            background: white;
+            color: #667eea;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            pointer-events: auto;
+        }
+        
+        .control-btn.start {
+            background: #4CAF50;
+            color: white;
+        }
+        
+        .control-btn.pause {
+            background: #FF9800;
+            color: white;
+        }
+        
+        .control-btn.reset {
+            background: #f44336;
+            color: white;
+        }
+        
+        .control-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .preparation-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.7);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 120px;
+            font-weight: bold;
+            color: white;
+            z-index: 10;
+            display: none;
+        }
+        
+        @media (max-width: 480px) {
+            .counter-display {
+                font-size: 60px;
+            }
+            
+            .time-display {
+                font-size: 30px;
+            }
+            
+            .preparation-overlay {
+                font-size: 100px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="camera-container">
+            <video id="video" autoplay playsinline muted></video>
+            <div class="overlay">
+                <div class="counter-display" id="counter">0</div>
+                <div class="time-display" id="time">00:30</div>
+            </div>
+            <div class="preparation-overlay" id="preparationOverlay"></div>
+        </div>
+        
+        <div class="controls-container">
+            <div class="duration-buttons">
+                <button class="duration-btn active" data-duration="30">30s</button>
+                <button class="duration-btn" data-duration="60">1m</button>
+                <button class="duration-btn" data-duration="120">2m</button>
+                <button class="duration-btn" data-duration="180">3m</button>
+                <button class="duration-btn" data-duration="300">5m</button>
+                <button class="duration-btn" data-duration="0">∞</button>
+            </div>
+            
+            <div class="main-controls">
+                <button class="control-btn start" id="startBtn">开始</button>
+                <button class="control-btn pause" id="pauseBtn" disabled>暂停</button>
+                <button class="control-btn reset" id="resetBtn">重置</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // DOM 元素
+        const video = document.getElementById('video');
+        const counterDisplay = document.getElementById('counter');
+        const timeDisplay = document.getElementById('time');
+        const startBtn = document.getElementById('startBtn');
+        const pauseBtn = document.getElementById('pauseBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const preparationOverlay = document.getElementById('preparationOverlay');
+        const durationButtons = document.querySelectorAll('.duration-btn');
+        
+        // 状态变量
+        let count = 0;
+        let selectedDuration = 30; // 默认30秒
+        let remainingTime = 30;
+        let isCounting = false;
+        let isPaused = false;
+        let animationId = null;
+        let lastFrame = null;
+        let motionThreshold = 30;
+        let stream = null;
+        let countdownInterval = null;
+        let motionDetectionInterval = null;
+        
+        // 初始化
+        function init() {
+            setupEventListeners();
+            updateDisplay();
+            
+            // 检查浏览器支持
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                alert('您的浏览器不支持摄像头功能');
+                return;
+            }
+        }
+        
+        // 设置事件监听器
+        function setupEventListeners() {
+            startBtn.addEventListener('click', startWorkout);
+            pauseBtn.addEventListener('click', togglePause);
+            resetBtn.addEventListener('click', resetCounter);
+            
+            durationButtons.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    durationButtons.forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    selectedDuration = parseInt(btn.dataset.duration);
+                    remainingTime = selectedDuration;
+                    updateDisplay();
+                });
+            });
+        }
+        
+        // 开始锻炼
+        async function startWorkout() {
+            if (isCounting && !isPaused) return;
+            
+            try {
+                // 如果是重新开始（不是继续）
+                if (!isCounting) {
+                    // 请求摄像头权限
+                    stream = await navigator.mediaDevices.getUserMedia({
+                        video: { 
+                            facingMode: 'user',
+                            width: { ideal: 640 },
+                            height: { ideal: 480 }
+                        },
+                        audio: false
+                    });
+                    
+                    video.srcObject = stream;
+                    
+                    // 等待视频加载
+                    await new Promise((resolve) => {
+                        video.onloadedmetadata = resolve;
+                    });
+                    
+                    // 重置状态
+                    count = 0;
+                    remainingTime = selectedDuration;
+                    isCounting = true;
+                    isPaused = false;
+                    lastFrame = null;
+                    
+                    updateDisplay();
+                    updateButtonStates();
+                    
+                    // 开始3秒准备倒计时
+                    await startPreparationCountdown();
+                    
+                    // 开始正式倒计时和运动检测
+                    startCountdown();
+                    startMotionDetection();
+                } else {
+                    // 继续暂停的训练
+                    isPaused = false;
+                    isCounting = true;
+                    updateButtonStates();
+                    startCountdown();
+                    startMotionDetection();
+                }
+                
+            } catch (error) {
+                console.error('启动失败:', error);
+                alert('无法访问摄像头，请允许权限');
+                isCounting = false;
+                isPaused = false;
+                updateButtonStates();
+                if (stream) {
+                    stopStream();
+                    stream = null;
+                }
+            }
+        }
+        
+        // 3秒准备倒计时
+        async function startPreparationCountdown() {
+            return new Promise((resolve) => {
+                let prepTime = 3;
+                preparationOverlay.textContent = prepTime;
+                preparationOverlay.style.display = 'flex';
+                
+                const prepInterval = setInterval(() => {
+                    prepTime--;
+                    if (prepTime > 0) {
+                        preparationOverlay.textContent = prepTime;
+                    } else {
+                        clearInterval(prepInterval);
+                        preparationOverlay.style.display = 'none';
+                        resolve();
+                    }
+                }, 1000);
+            });
+        }
+        
+        // 开始倒计时
+        function startCountdown() {
+            if (countdownInterval) clearInterval(countdownInterval);
+            
+            countdownInterval = setInterval(() => {
+                if (remainingTime > 0) {
+                    remainingTime--;
+                    updateDisplay();
+                } else {
+                    finishWorkout();
+                }
+            }, 1000);
+        }
+        
+        // 开始运动检测
+        function startMotionDetection() {
+            if (motionDetectionInterval) clearInterval(motionDetectionInterval);
+            
+            motionDetectionInterval = setInterval(detectMotion, 100);
+        }
+        
+        // 切换暂停/继续
+        function togglePause() {
+            if (isPaused) {
+                // 继续
+                isPaused = false;
+                pauseBtn.textContent = '暂停';
+                startCountdown();
+                startMotionDetection();
+            } else {
+                // 暂停
+                isPaused = true;
+                pauseBtn.textContent = '继续';
+                if (countdownInterval) clearInterval(countdownInterval);
+                if (motionDetectionInterval) clearInterval(motionDetectionInterval);
+            }
+        }
+        
+        // 完成锻炼
+        function finishWorkout() {
+            isCounting = false;
+            isPaused = false;
+            updateButtonStates();
+            
+            if (countdownInterval) clearInterval(countdownInterval);
+            if (motionDetectionInterval) clearInterval(motionDetectionInterval);
+            
+            setTimeout(() => {
+                alert(`🎉 跳绳完成！\n总次数: ${count}\n平均速度: ${selectedDuration > 0 ? Math.round((count / selectedDuration) * 60) : 0} 次/分钟`);
+            }, 100);
+        }
+        
+        // 重置计数器
+        function resetCounter() {
+            isCounting = false;
+            isPaused = false;
+            count = 0;
+            remainingTime = selectedDuration;
+            updateDisplay();
+            updateButtonStates();
+            
+            if (countdownInterval) clearInterval(countdownInterval);
+            if (motionDetectionInterval) clearInterval(motionDetectionInterval);
+            
+            if (stream) {
+                stopStream();
+                stream = null;
+            }
+        }
+        
+        // 停止摄像头流
+        function stopStream() {
+            if (stream) {
+                const tracks = stream.getTracks();
+                tracks.forEach(track => track.stop());
+            }
+        }
+        
+        // 运动检测
+        function detectMotion() {
+            if (!isCounting || isPaused) return;
+            
+            try {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                canvas.width = video.videoWidth || 640;
+                canvas.height = video.videoHeight || 480;
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                
+                const currentFrame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                
+                if (lastFrame) {
+                    const diff = calculateFrameDifference(lastFrame, currentFrame);
+                    if (diff > motionThreshold) {
+                        count++;
+                        updateDisplay();
+                    }
+                }
+                
+                lastFrame = currentFrame;
+            } catch (error) {
+                console.error('运动检测错误:', error);
+            }
+        }
+        
+        // 计算帧间差异
+        function calculateFrameDifference(frame1, frame2) {
+            let diff = 0;
+            const maxLength = Math.min(frame1.data.length, frame2.data.length);
+            const pixels = maxLength / 4;
+            const step = Math.max(1, Math.floor(pixels / 300));
+            
+            for (let i = 0; i < maxLength; i += step * 4) {
+                const rDiff = Math.abs(frame1.data[i] - frame2.data[i]);
+                const gDiff = Math.abs(frame1.data[i + 1] - frame2.data[i + 1]);
+                const bDiff = Math.abs(frame1.data[i + 2] - frame2.data[i + 2]);
+                diff += (rDiff + gDiff + bDiff) / 3;
+            }
+            
+            return diff / (pixels / step);
+        }
+        
+        // 更新显示
+        function updateDisplay() {
+            counterDisplay.textContent = count;
+            
+            if (selectedDuration === 0) {
+                // 无限模式：显示已用时间
+                const elapsed = 30 - remainingTime; // 这里简化处理
+                const minutes = Math.floor(elapsed / 60);
+                const seconds = elapsed % 60;
+                timeDisplay.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            } else {
+                // 倒计时模式
+                const minutes = Math.floor(remainingTime / 60);
+                const seconds = remainingTime % 60;
+                timeDisplay.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            }
+        }
+        
+        // 更新按钮状态
+        function updateButtonStates() {
+            if (!isCounting) {
+                // 未开始状态
+                startBtn.disabled = false;
+                pauseBtn.disabled = true;
+                pauseBtn.textContent = '暂停';
+            } else if (isPaused) {
+                // 暂停状态
+                startBtn.disabled = true;
+                pauseBtn.disabled = false;
+                pauseBtn.textContent = '继续';
+            } else {
+                // 计数中状态
+                startBtn.disabled = true;
+                pauseBtn.disabled = false;
+                pauseBtn.textContent = '暂停';
+            }
+            
+            resetBtn.disabled = false;
+        }
+        
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', init);
+        
+        // 处理页面卸载
+        window.addEventListener('beforeunload', () => {
+            if (stream) stopStream();
+            if (countdownInterval) clearInterval(countdownInterval);
+            if (motionDetectionInterval) clearInterval(motionDetectionInterval);
+        });
+    </script>
+</body>
+</html>
