@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>跳绳计数器 - iPhone 浏览器版</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            color: white;
+        }
+        
+        .container {
+            width: 100%;
+            max-width: 500px;
+            text-align: center;
+        }
+        
+        h1 {
+            font-size: 28px;
+            margin-bottom: 30px;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .counter-display {
+            font-size: 80px;
+            font-weight: bold;
+            margin: 20px 0;
+            text-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        }
+        
+        .stats {
+            display: flex;
+            justify-content: space-around;
+            margin: 20px 0;
+            font-size: 16px;
+        }
+        
+        .camera-container {
+            width: 100%;
+            height: 300px;
+            background: rgba(0,0,0,0.3);
+            border-radius: 15px;
+            overflow: hidden;
+            margin: 20px 0;
+            position: relative;
+        }
+        
+        #video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1); /* 镜像效果 */
+        }
+        
+        .controls {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-top: 20px;
+        }
+        
+        button {
+            padding: 12px 24px;
+            font-size: 16px;
+            border: none;
+            border-radius: 25px;
+            background: white;
+            color: #667eea;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.3);
+        }
+        
+        button:active {
+            transform: translateY(0);
+        }
+        
+        #startBtn {
+            background: #4CAF50;
+            color: white;
+        }
+        
+        #pauseBtn {
+            background: #FF9800;
+            color: white;
+        }
+        
+        #resetBtn {
+            background: #f44336;
+            color: white;
+        }
+        
+        .instructions {
+            margin-top: 20px;
+            font-size: 14px;
+            line-height: 1.5;
+            background: rgba(255,255,255,0.1);
+            padding: 15px;
+            border-radius: 10px;
+        }
+        
+        @media (max-width: 480px) {
+            .counter-display {
+                font-size: 60px;
+            }
+            
+            h1 {
+                font-size: 24px;
+            }
+            
+            .camera-container {
+                height: 250px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📱 跳绳计数器</h1>
+        <div class="counter-display" id="counter">0</div>
+        <div class="stats">
+            <div>时间: <span id="time">00:00</span></div>
+            <div>速度: <span id="speed">0</span>/分钟</div>
+        </div>
+        
+        <div class="camera-container">
+            <video id="video" autoplay playsinline></video>
+        </div>
+        
+        <div class="controls">
+            <button id="startBtn">开始</button>
+            <button id="pauseBtn">暂停</button>
+            <button id="resetBtn">重置</button>
+        </div>
+        
+        <div class="instructions">
+            <p>💡 使用说明：</p>
+            <p>1. 点击"开始"并允许摄像头访问</p>
+            <p>2. 将手机固定在稳定位置</p>
+            <p>3. 确保光线充足，身体在画面中清晰可见</p>
+            <p>4. 开始跳绳，系统会自动计数！</p>
+        </div>
+    </div>
+
+    <script>
+        // DOM 元素
+        const video = document.getElementById('video');
+        const counterDisplay = document.getElementById('counter');
+        const timeDisplay = document.getElementById('time');
+        const speedDisplay = document.getElementById('speed');
+        const startBtn = document.getElementById('startBtn');
+        const pauseBtn = document.getElementById('pauseBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        
+        // 状态变量
+        let count = 0;
+        let startTime = null;
+        let elapsedTime = 0;
+        let isCounting = false;
+        let animationId = null;
+        let lastFrame = null;
+        let motionThreshold = 30; // 运动检测阈值
+        
+        // 初始化
+        function init() {
+            setupEventListeners();
+            updateDisplay();
+        }
+        
+        // 设置事件监听器
+        function setupEventListeners() {
+            startBtn.addEventListener('click', startCounting);
+            pauseBtn.addEventListener('click', pauseCounting);
+            resetBtn.addEventListener('click', resetCounter);
+        }
+        
+        // 开始计数
+        async function startCounting() {
+            if (isCounting) return;
+            
+            try {
+                // 请求摄像头权限
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { 
+                        facingMode: 'user', // 前置摄像头
+                        width: { ideal: 640 },
+                        height: { ideal: 480 }
+                    },
+                    audio: false
+                });
+                
+                video.srcObject = stream;
+                isCounting = true;
+                startBtn.disabled = true;
+                pauseBtn.disabled = false;
+                
+                if (startTime === null) {
+                    startTime = Date.now();
+                }
+                
+                // 开始运动检测
+                detectMotion();
+                
+            } catch (error) {
+                console.error('摄像头访问错误:', error);
+                alert('无法访问摄像头，请确保已授权并使用HTTPS连接');
+            }
+        }
+        
+        // 暂停计数
+        function pauseCounting() {
+            if (!isCounting) return;
+            
+            isCounting = false;
+            startBtn.disabled = false;
+            pauseBtn.disabled = true;
+            
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+                animationId = null;
+            }
+        }
+        
+        // 重置计数器
+        function resetCounter() {
+            pauseCounting();
+            count = 0;
+            startTime = null;
+            elapsedTime = 0;
+            lastFrame = null;
+            startBtn.disabled = false;
+            pauseBtn.disabled = true;
+            updateDisplay();
+        }
+        
+        // 运动检测
+        function detectMotion() {
+            if (!isCounting) return;
+            
+            // 获取当前视频帧
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            const currentFrame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            
+            if (lastFrame) {
+                // 计算帧间差异
+                const diff = calculateFrameDifference(lastFrame, currentFrame);
+                
+                // 如果运动超过阈值，增加计数
+                if (diff > motionThreshold) {
+                    count++;
+                    updateDisplay();
+                }
+            }
+            
+            lastFrame = currentFrame;
+            animationId = requestAnimationFrame(detectMotion);
+        }
+        
+        // 计算帧间差异
+        function calculateFrameDifference(frame1, frame2) {
+            let diff = 0;
+            const pixels = frame1.data.length / 4; // RGBA
+            
+            // 只检查部分像素以提高性能
+            const step = Math.max(1, Math.floor(pixels / 1000));
+            
+            for (let i = 0; i < frame1.data.length; i += step * 4) {
+                const rDiff = Math.abs(frame1.data[i] - frame2.data[i]);
+                const gDiff = Math.abs(frame1.data[i + 1] - frame2.data[i + 1]);
+                const bDiff = Math.abs(frame1.data[i + 2] - frame2.data[i + 2]);
+                diff += (rDiff + gDiff + bDiff) / 3;
+            }
+            
+            return diff / (pixels / step);
+        }
+        
+        // 更新显示
+        function updateDisplay() {
+            counterDisplay.textContent = count;
+            
+            // 更新时间
+            if (startTime) {
+                const currentTime = Date.now();
+                elapsedTime = currentTime - startTime;
+                const minutes = Math.floor(elapsedTime / 60000);
+                const seconds = Math.floor((elapsedTime % 60000) / 1000);
+                timeDisplay.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            } else {
+                timeDisplay.textContent = '00:00';
+            }
+            
+            // 更新速度
+            if (elapsedTime > 0) {
+                const speed = Math.round((count / elapsedTime) * 60000);
+                speedDisplay.textContent = speed;
+            } else {
+                speedDisplay.textContent = '0';
+            }
+        }
+        
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', init);
+        
+        // 处理页面可见性变化
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                pauseCounting();
+            }
+        });
+    </script>
+</body>
+</html>
