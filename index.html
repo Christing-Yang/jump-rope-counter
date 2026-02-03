@@ -95,6 +95,19 @@
             transform: scaleX(-1); /* 镜像效果 */
         }
         
+        .overlay-text {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 10px 15px;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: bold;
+            z-index: 10;
+        }
+        
         .controls {
             display: flex;
             justify-content: center;
@@ -137,6 +150,12 @@
         #resetBtn {
             background: #f44336;
             color: white;
+        }
+        
+        #saveBtn {
+            background: #2196F3;
+            color: white;
+            display: none;
         }
         
         .instructions {
@@ -198,12 +217,14 @@
         
         <div class="camera-container">
             <video id="video" autoplay playsinline muted></video>
+            <div class="overlay-text" id="overlayText">次数: 0 | 时间: 00:00</div>
         </div>
         
         <div class="controls">
             <button id="startBtn">开始</button>
             <button id="pauseBtn" disabled>暂停</button>
             <button id="resetBtn">重置</button>
+            <button id="saveBtn">保存视频</button>
         </div>
         
         <div class="instructions">
@@ -212,6 +233,7 @@
             <p>2. 将手机固定在稳定位置</p>
             <p>3. 确保光线充足，身体在画面中清晰可见</p>
             <p>4. 开始跳绳，系统会自动计数！</p>
+            <p>5. 完成后点击"保存视频"下载带统计信息的视频</p>
         </div>
         
         <div id="errorMessage" class="error-message"></div>
@@ -226,8 +248,10 @@
         const startBtn = document.getElementById('startBtn');
         const pauseBtn = document.getElementById('pauseBtn');
         const resetBtn = document.getElementById('resetBtn');
+        const saveBtn = document.getElementById('saveBtn');
         const durationSelect = document.getElementById('duration');
         const errorMessage = document.getElementById('errorMessage');
+        const overlayText = document.getElementById('overlayText');
         
         // 状态变量
         let count = 0;
@@ -240,6 +264,8 @@
         let stream = null;
         let timerInterval = null;
         let selectedDuration = 60; // 默认1分钟
+        let mediaRecorder = null;
+        let recordedChunks = [];
         
         // 初始化
         function init() {
@@ -249,6 +275,12 @@
             // 检查是否支持 getUserMedia
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
                 showError('您的浏览器不支持摄像头功能，请使用最新版本的 Safari 浏览器。');
+                return;
+            }
+            
+            // 检查是否支持 MediaRecorder
+            if (!window.MediaRecorder) {
+                showError('您的浏览器不支持视频录制功能。请使用最新版本的 Safari 浏览器。');
                 return;
             }
             
@@ -264,6 +296,7 @@
             startBtn.addEventListener('click', handleStart);
             pauseBtn.addEventListener('click', pauseCounting);
             resetBtn.addEventListener('click', resetCounter);
+            saveBtn.addEventListener('click', saveVideo);
             durationSelect.addEventListener('change', handleDurationChange);
         }
         
@@ -301,6 +334,9 @@
                     video.onloadedmetadata = resolve;
                 });
                 
+                // 初始化 MediaRecorder
+                initMediaRecorder();
+                
                 // 开始计数
                 startCounting();
                 
@@ -316,12 +352,84 @@
             }
         }
         
+        // 初始化 MediaRecorder
+        function initMediaRecorder() {
+            recordedChunks = [];
+            
+            // 创建 canvas 用于添加叠加文本
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            canvas.width = video.videoWidth || 640;
+            canvas.height = video.videoHeight || 480;
+            
+            // 创建离屏 canvas 流
+            const canvasStream = canvas.captureStream(30); // 30fps
+            
+            // MediaRecorder 配置
+            const options = {
+                mimeType: 'video/webm;codecs=vp9',
+                videoBitsPerSecond: 2500000
+            };
+            
+            // 检查支持的 MIME 类型
+            if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+                options.mimeType = 'video/webm;codecs=vp8';
+            }
+            
+            if (!MediaRecorder.isType_supported(options.mimeType)) {
+                options.mimeType = 'video/webm';
+            }
+            
+            mediaRecorder = new MediaRecorder(canvasStream, options);
+            
+            // 处理录制数据
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    recordedChunks.push(event.data);
+                }
+            };
+            
+            // 开始录制
+            mediaRecorder.start();
+            
+            // 在 canvas 上绘制视频帧和叠加文本
+            function drawFrame() {
+                if (!isCounting && !mediaRecorder.state === 'recording') {
+                    return;
+                }
+                
+                // 绘制视频帧
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                
+                // 添加叠加文本（时间和次数）
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                ctx.fillRect(10, 10, 200, 50);
+                ctx.fillStyle = 'white';
+                ctx.font = '16px Arial';
+                ctx.fontWeight = 'bold';
+                ctx.fillText(`次数: ${count}`, 20, 30);
+                ctx.fillText(`时间: ${formatTime(elapsedTime)}`, 20, 50);
+                
+                requestAnimationFrame(drawFrame);
+            }
+            
+            drawFrame();
+        }
+        
+        // 格式化时间显示
+        function formatTime(ms) {
+            const minutes = Math.floor(ms / 60000);
+            const seconds = Math.floor((ms % 60000) / 1000);
+            return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        }
+        
         // 开始计数
         function startCounting() {
             isCounting = true;
             startBtn.disabled = true;
             pauseBtn.disabled = false;
             durationSelect.disabled = true;
+            saveBtn.style.display = 'none';
             
             startTime = Date.now();
             elapsedTime = 0;
@@ -348,6 +456,7 @@
         // 完成锻炼
         function finishWorkout() {
             pauseCounting();
+            saveBtn.style.display = 'block';
             alert(`🎉 跳绳完成！\n总次数: ${count}\n平均速度: ${Math.round((count / selectedDuration) * 60)} 次/分钟`);
         }
         
@@ -369,6 +478,11 @@
                 clearInterval(timerInterval);
                 timerInterval = null;
             }
+            
+            // 停止 MediaRecorder
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
+            }
         }
         
         // 重置计数器
@@ -381,12 +495,19 @@
             startBtn.disabled = false;
             pauseBtn.disabled = true;
             durationSelect.disabled = false;
+            saveBtn.style.display = 'none';
             updateDisplay();
             
             // 停止摄像头流
             if (stream) {
                 stopStream();
                 stream = null;
+            }
+            
+            // 重置录制数据
+            recordedChunks = [];
+            if (mediaRecorder) {
+                mediaRecorder = null;
             }
         }
         
@@ -453,6 +574,7 @@
         // 更新显示
         function updateDisplay() {
             counterDisplay.textContent = count;
+            overlayText.textContent = `次数: ${count} | 时间: ${formatTime(elapsedTime)}`;
             
             // 更新时间
             if (startTime) {
@@ -472,6 +594,31 @@
             } else {
                 speedDisplay.textContent = '0';
             }
+        }
+        
+        // 保存视频
+        function saveVideo() {
+            if (recordedChunks.length === 0) {
+                showError('没有可保存的视频数据。');
+                return;
+            }
+            
+            const blob = new Blob(recordedChunks, { type: 'video/webm' });
+            const url = URL.createObjectURL(blob);
+            
+            // 创建下载链接
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = `jump-rope-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.webm`;
+            document.body.appendChild(a);
+            a.click();
+            
+            // 清理
+            setTimeout(() => {
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }, 100);
         }
         
         // 显示错误信息
@@ -501,6 +648,9 @@
             }
             if (timerInterval) {
                 clearInterval(timerInterval);
+            }
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
             }
         });
     </script>
