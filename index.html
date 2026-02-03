@@ -119,6 +119,12 @@
             border-radius: 10px;
         }
         
+        .error-message {
+            color: #ff6b6b;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+        
         @media (max-width: 480px) {
             .counter-display {
                 font-size: 60px;
@@ -144,12 +150,12 @@
         </div>
         
         <div class="camera-container">
-            <video id="video" autoplay playsinline></video>
+            <video id="video" autoplay playsinline muted></video>
         </div>
         
         <div class="controls">
             <button id="startBtn">开始</button>
-            <button id="pauseBtn">暂停</button>
+            <button id="pauseBtn" disabled>暂停</button>
             <button id="resetBtn">重置</button>
         </div>
         
@@ -160,6 +166,8 @@
             <p>3. 确保光线充足，身体在画面中清晰可见</p>
             <p>4. 开始跳绳，系统会自动计数！</p>
         </div>
+        
+        <div id="errorMessage" class="error-message"></div>
     </div>
 
     <script>
@@ -171,6 +179,7 @@
         const startBtn = document.getElementById('startBtn');
         const pauseBtn = document.getElementById('pauseBtn');
         const resetBtn = document.getElementById('resetBtn');
+        const errorMessage = document.getElementById('errorMessage');
         
         // 状态变量
         let count = 0;
@@ -180,27 +189,46 @@
         let animationId = null;
         let lastFrame = null;
         let motionThreshold = 30; // 运动检测阈值
+        let stream = null;
         
         // 初始化
         function init() {
             setupEventListeners();
             updateDisplay();
+            
+            // 检查是否支持 getUserMedia
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                showError('您的浏览器不支持摄像头功能，请使用最新版本的 Safari 浏览器。');
+                return;
+            }
+            
+            // 检查是否在 HTTPS 环境下
+            if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+                showError('请在 HTTPS 环境下使用此应用（GitHub Pages 已启用 HTTPS）');
+                return;
+            }
         }
         
         // 设置事件监听器
         function setupEventListeners() {
-            startBtn.addEventListener('click', startCounting);
+            startBtn.addEventListener('click', handleStart);
             pauseBtn.addEventListener('click', pauseCounting);
             resetBtn.addEventListener('click', resetCounter);
         }
         
-        // 开始计数
-        async function startCounting() {
-            if (isCounting) return;
-            
+        // 处理开始按钮点击
+        async function handleStart() {
             try {
+                // 清除之前的错误信息
+                hideError();
+                
+                // 如果已经有流，先停止
+                if (stream) {
+                    stopStream();
+                }
+                
                 // 请求摄像头权限
-                const stream = await navigator.mediaDevices.getUserMedia({
+                stream = await navigator.mediaDevices.getUserMedia({
                     video: { 
                         facingMode: 'user', // 前置摄像头
                         width: { ideal: 640 },
@@ -209,22 +237,41 @@
                     audio: false
                 });
                 
+                // 设置视频源
                 video.srcObject = stream;
-                isCounting = true;
-                startBtn.disabled = true;
-                pauseBtn.disabled = false;
                 
-                if (startTime === null) {
-                    startTime = Date.now();
-                }
+                // 等待视频元数据加载
+                await new Promise((resolve) => {
+                    video.onloadedmetadata = resolve;
+                });
                 
-                // 开始运动检测
-                detectMotion();
+                // 开始计数
+                startCounting();
                 
             } catch (error) {
                 console.error('摄像头访问错误:', error);
-                alert('无法访问摄像头，请确保已授权并使用HTTPS连接');
+                if (error.name === 'NotAllowedError') {
+                    showError('请允许摄像头访问权限。如果之前拒绝了，请在 Safari 设置中重置权限。');
+                } else if (error.name === 'NotFoundError') {
+                    showError('未找到摄像头设备。');
+                } else {
+                    showError('无法访问摄像头：' + error.message);
+                }
             }
+        }
+        
+        // 开始计数
+        function startCounting() {
+            isCounting = true;
+            startBtn.disabled = true;
+            pauseBtn.disabled = false;
+            
+            if (startTime === null) {
+                startTime = Date.now();
+            }
+            
+            // 开始运动检测
+            detectMotion();
         }
         
         // 暂停计数
@@ -251,45 +298,65 @@
             startBtn.disabled = false;
             pauseBtn.disabled = true;
             updateDisplay();
+            
+            // 停止摄像头流
+            if (stream) {
+                stopStream();
+                stream = null;
+            }
+        }
+        
+        // 停止摄像头流
+        function stopStream() {
+            if (stream) {
+                const tracks = stream.getTracks();
+                tracks.forEach(track => track.stop());
+            }
         }
         
         // 运动检测
         function detectMotion() {
             if (!isCounting) return;
             
-            // 获取当前视频帧
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            
-            const currentFrame = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            
-            if (lastFrame) {
-                // 计算帧间差异
-                const diff = calculateFrameDifference(lastFrame, currentFrame);
+            try {
+                // 获取当前视频帧
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                canvas.width = video.videoWidth || 640;
+                canvas.height = video.videoHeight || 480;
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
                 
-                // 如果运动超过阈值，增加计数
-                if (diff > motionThreshold) {
-                    count++;
-                    updateDisplay();
+                const currentFrame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                
+                if (lastFrame) {
+                    // 计算帧间差异
+                    const diff = calculateFrameDifference(lastFrame, currentFrame);
+                    
+                    // 如果运动超过阈值，增加计数
+                    if (diff > motionThreshold) {
+                        count++;
+                        updateDisplay();
+                    }
                 }
+                
+                lastFrame = currentFrame;
+                animationId = requestAnimationFrame(detectMotion);
+            } catch (error) {
+                console.error('运动检测错误:', error);
+                // 继续检测，避免完全停止
+                animationId = requestAnimationFrame(detectMotion);
             }
-            
-            lastFrame = currentFrame;
-            animationId = requestAnimationFrame(detectMotion);
         }
         
         // 计算帧间差异
         function calculateFrameDifference(frame1, frame2) {
             let diff = 0;
-            const pixels = frame1.data.length / 4; // RGBA
+            const pixels = Math.min(frame1.data.length, frame2.data.length) / 4; // RGBA
             
             // 只检查部分像素以提高性能
             const step = Math.max(1, Math.floor(pixels / 1000));
             
-            for (let i = 0; i < frame1.data.length; i += step * 4) {
+            for (let i = 0; i < Math.min(frame1.data.length, frame2.data.length); i += step * 4) {
                 const rDiff = Math.abs(frame1.data[i] - frame2.data[i]);
                 const gDiff = Math.abs(frame1.data[i + 1] - frame2.data[i + 1]);
                 const bDiff = Math.abs(frame1.data[i + 2] - frame2.data[i + 2]);
@@ -323,6 +390,16 @@
             }
         }
         
+        // 显示错误信息
+        function showError(message) {
+            errorMessage.textContent = message;
+        }
+        
+        // 隐藏错误信息
+        function hideError() {
+            errorMessage.textContent = '';
+        }
+        
         // 页面加载完成后初始化
         document.addEventListener('DOMContentLoaded', init);
         
@@ -330,6 +407,13 @@
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) {
                 pauseCounting();
+            }
+        });
+        
+        // 处理页面卸载
+        window.addEventListener('beforeunload', () => {
+            if (stream) {
+                stopStream();
             }
         });
     </script>
