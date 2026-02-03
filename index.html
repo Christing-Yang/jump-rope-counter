@@ -31,8 +31,37 @@
         
         h1 {
             font-size: 28px;
-            margin-bottom: 30px;
+            margin-bottom: 20px;
             text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .duration-selector {
+            margin: 15px 0;
+            padding: 10px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+        }
+        
+        .duration-selector label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 16px;
+        }
+        
+        .duration-selector select {
+            padding: 8px 12px;
+            font-size: 16px;
+            border: none;
+            border-radius: 8px;
+            background: white;
+            color: #667eea;
+            font-weight: bold;
+            appearance: none;
+            background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+            background-repeat: no-repeat;
+            background-position: right 10px center;
+            background-size: 16px;
+            padding-right: 30px;
         }
         
         .counter-display {
@@ -137,12 +166,30 @@
             .camera-container {
                 height: 250px;
             }
+            
+            .duration-selector select {
+                width: 100%;
+            }
         }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>📱 跳绳计数器</h1>
+        
+        <div class="duration-selector">
+            <label for="duration">⏱️ 选择跳绳时长：</label>
+            <select id="duration">
+                <option value="30">30秒</option>
+                <option value="60" selected>1分钟</option>
+                <option value="120">2分钟</option>
+                <option value="180">3分钟</option>
+                <option value="300">5分钟</option>
+                <option value="600">10分钟</option>
+                <option value="0">不限时</option>
+            </select>
+        </div>
+        
         <div class="counter-display" id="counter">0</div>
         <div class="stats">
             <div>时间: <span id="time">00:00</span></div>
@@ -161,7 +208,7 @@
         
         <div class="instructions">
             <p>💡 使用说明：</p>
-            <p>1. 点击"开始"并允许摄像头访问</p>
+            <p>1. 选择跳绳时长，点击"开始"并允许摄像头访问</p>
             <p>2. 将手机固定在稳定位置</p>
             <p>3. 确保光线充足，身体在画面中清晰可见</p>
             <p>4. 开始跳绳，系统会自动计数！</p>
@@ -179,6 +226,7 @@
         const startBtn = document.getElementById('startBtn');
         const pauseBtn = document.getElementById('pauseBtn');
         const resetBtn = document.getElementById('resetBtn');
+        const durationSelect = document.getElementById('duration');
         const errorMessage = document.getElementById('errorMessage');
         
         // 状态变量
@@ -190,6 +238,8 @@
         let lastFrame = null;
         let motionThreshold = 30; // 运动检测阈值
         let stream = null;
+        let timerInterval = null;
+        let selectedDuration = 60; // 默认1分钟
         
         // 初始化
         function init() {
@@ -214,6 +264,12 @@
             startBtn.addEventListener('click', handleStart);
             pauseBtn.addEventListener('click', pauseCounting);
             resetBtn.addEventListener('click', resetCounter);
+            durationSelect.addEventListener('change', handleDurationChange);
+        }
+        
+        // 处理时长选择变化
+        function handleDurationChange() {
+            selectedDuration = parseInt(durationSelect.value);
         }
         
         // 处理开始按钮点击
@@ -265,13 +321,34 @@
             isCounting = true;
             startBtn.disabled = true;
             pauseBtn.disabled = false;
+            durationSelect.disabled = true;
             
-            if (startTime === null) {
-                startTime = Date.now();
-            }
+            startTime = Date.now();
+            elapsedTime = 0;
             
             // 开始运动检测
             detectMotion();
+            
+            // 开始定时器更新
+            if (timerInterval) {
+                clearInterval(timerInterval);
+            }
+            timerInterval = setInterval(updateDisplay, 100);
+            
+            // 检查是否达到设定时长
+            if (selectedDuration > 0) {
+                setTimeout(() => {
+                    if (isCounting) {
+                        finishWorkout();
+                    }
+                }, selectedDuration * 1000);
+            }
+        }
+        
+        // 完成锻炼
+        function finishWorkout() {
+            pauseCounting();
+            alert(`🎉 跳绳完成！\n总次数: ${count}\n平均速度: ${Math.round((count / selectedDuration) * 60)} 次/分钟`);
         }
         
         // 暂停计数
@@ -281,10 +358,16 @@
             isCounting = false;
             startBtn.disabled = false;
             pauseBtn.disabled = true;
+            durationSelect.disabled = false;
             
             if (animationId) {
                 cancelAnimationFrame(animationId);
                 animationId = null;
+            }
+            
+            if (timerInterval) {
+                clearInterval(timerInterval);
+                timerInterval = null;
             }
         }
         
@@ -297,6 +380,7 @@
             lastFrame = null;
             startBtn.disabled = false;
             pauseBtn.disabled = true;
+            durationSelect.disabled = false;
             updateDisplay();
             
             // 停止摄像头流
@@ -414,6 +498,9 @@
         window.addEventListener('beforeunload', () => {
             if (stream) {
                 stopStream();
+            }
+            if (timerInterval) {
+                clearInterval(timerInterval);
             }
         });
     </script>
