@@ -95,19 +95,6 @@
             transform: scaleX(-1); /* 镜像效果 */
         }
         
-        .overlay-text {
-            position: absolute;
-            top: 20px;
-            left: 20px;
-            background: rgba(0,0,0,0.7);
-            color: white;
-            padding: 10px 15px;
-            border-radius: 10px;
-            font-size: 16px;
-            font-weight: bold;
-            z-index: 10;
-        }
-        
         .controls {
             display: flex;
             justify-content: center;
@@ -152,12 +139,6 @@
             color: white;
         }
         
-        #saveBtn {
-            background: #2196F3;
-            color: white;
-            display: none;
-        }
-        
         .instructions {
             margin-top: 20px;
             font-size: 14px;
@@ -167,10 +148,10 @@
             border-radius: 10px;
         }
         
-        .error-message {
-            color: #ff6b6b;
+        .status-indicator {
             margin-top: 10px;
             font-size: 14px;
+            color: #ffeb3b;
         }
         
         @media (max-width: 480px) {
@@ -217,26 +198,23 @@
         
         <div class="camera-container">
             <video id="video" autoplay playsinline muted></video>
-            <div class="overlay-text" id="overlayText">次数: 0 | 时间: 00:00</div>
         </div>
         
         <div class="controls">
             <button id="startBtn">开始</button>
             <button id="pauseBtn" disabled>暂停</button>
             <button id="resetBtn">重置</button>
-            <button id="saveBtn">保存视频</button>
         </div>
+        
+        <div class="status-indicator" id="status">准备就绪</div>
         
         <div class="instructions">
             <p>💡 使用说明：</p>
-            <p>1. 选择跳绳时长，点击"开始"并允许摄像头访问</p>
+            <p>1. 点击"开始"并允许摄像头访问</p>
             <p>2. 将手机固定在稳定位置</p>
             <p>3. 确保光线充足，身体在画面中清晰可见</p>
             <p>4. 开始跳绳，系统会自动计数！</p>
-            <p>5. 完成后点击"保存视频"下载带统计信息的视频</p>
         </div>
-        
-        <div id="errorMessage" class="error-message"></div>
     </div>
 
     <script>
@@ -248,10 +226,8 @@
         const startBtn = document.getElementById('startBtn');
         const pauseBtn = document.getElementById('pauseBtn');
         const resetBtn = document.getElementById('resetBtn');
-        const saveBtn = document.getElementById('saveBtn');
         const durationSelect = document.getElementById('duration');
-        const errorMessage = document.getElementById('errorMessage');
-        const overlayText = document.getElementById('overlayText');
+        const statusIndicator = document.getElementById('status');
         
         // 状态变量
         let count = 0;
@@ -260,66 +236,50 @@
         let isCounting = false;
         let animationId = null;
         let lastFrame = null;
-        let motionThreshold = 30; // 运动检测阈值
+        let motionThreshold = 30;
         let stream = null;
         let timerInterval = null;
-        let selectedDuration = 60; // 默认1分钟
-        let mediaRecorder = null;
-        let recordedChunks = [];
+        let selectedDuration = 60;
+        let countdownTimeout = null;
         
         // 初始化
         function init() {
             setupEventListeners();
             updateDisplay();
+            updateStatus('准备就绪');
             
-            // 检查是否支持 getUserMedia
+            // 检查浏览器支持
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                showError('您的浏览器不支持摄像头功能，请使用最新版本的 Safari 浏览器。');
+                updateStatus('❌ 浏览器不支持摄像头');
+                startBtn.disabled = true;
                 return;
             }
             
-            // 检查是否支持 MediaRecorder
-            if (!window.MediaRecorder) {
-                showError('您的浏览器不支持视频录制功能。请使用最新版本的 Safari 浏览器。');
-                return;
-            }
-            
-            // 检查是否在 HTTPS 环境下
             if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
-                showError('请在 HTTPS 环境下使用此应用（GitHub Pages 已启用 HTTPS）');
-                return;
+                updateStatus('⚠️ 请在HTTPS环境下使用');
             }
         }
         
         // 设置事件监听器
         function setupEventListeners() {
-            startBtn.addEventListener('click', handleStart);
+            startBtn.addEventListener('click', startWorkout);
             pauseBtn.addEventListener('click', pauseCounting);
             resetBtn.addEventListener('click', resetCounter);
-            saveBtn.addEventListener('click', saveVideo);
-            durationSelect.addEventListener('change', handleDurationChange);
+            durationSelect.addEventListener('change', () => {
+                selectedDuration = parseInt(durationSelect.value);
+            });
         }
         
-        // 处理时长选择变化
-        function handleDurationChange() {
-            selectedDuration = parseInt(durationSelect.value);
-        }
-        
-        // 处理开始按钮点击
-        async function handleStart() {
+        // 开始锻炼
+        async function startWorkout() {
             try {
-                // 清除之前的错误信息
-                hideError();
-                
-                // 如果已经有流，先停止
-                if (stream) {
-                    stopStream();
-                }
+                updateStatus('🔄 请求摄像头权限...');
+                startBtn.disabled = true;
                 
                 // 请求摄像头权限
                 stream = await navigator.mediaDevices.getUserMedia({
                     video: { 
-                        facingMode: 'user', // 前置摄像头
+                        facingMode: 'user',
                         width: { ideal: 640 },
                         height: { ideal: 480 }
                     },
@@ -329,135 +289,53 @@
                 // 设置视频源
                 video.srcObject = stream;
                 
-                // 等待视频元数据加载
+                // 等待视频加载
                 await new Promise((resolve) => {
                     video.onloadedmetadata = resolve;
                 });
                 
-                // 初始化 MediaRecorder
-                initMediaRecorder();
+                // 初始化计数状态
+                count = 0;
+                startTime = Date.now();
+                elapsedTime = 0;
+                isCounting = true;
+                lastFrame = null;
                 
-                // 开始计数
-                startCounting();
+                // 更新UI状态
+                startBtn.disabled = true;
+                pauseBtn.disabled = false;
+                durationSelect.disabled = true;
+                updateStatus('✅ 计时中...');
+                
+                // 启动计时器（立即开始！）
+                if (timerInterval) clearInterval(timerInterval);
+                timerInterval = setInterval(updateDisplay, 100);
+                
+                // 启动运动检测
+                detectMotion();
+                
+                // 设置自动结束
+                if (selectedDuration > 0) {
+                    if (countdownTimeout) clearTimeout(countdownTimeout);
+                    countdownTimeout = setTimeout(finishWorkout, selectedDuration * 1000);
+                }
                 
             } catch (error) {
-                console.error('摄像头访问错误:', error);
-                if (error.name === 'NotAllowedError') {
-                    showError('请允许摄像头访问权限。如果之前拒绝了，请在 Safari 设置中重置权限。');
-                } else if (error.name === 'NotFoundError') {
-                    showError('未找到摄像头设备。');
-                } else {
-                    showError('无法访问摄像头：' + error.message);
+                console.error('启动失败:', error);
+                updateStatus('❌ 摄像头访问被拒绝');
+                startBtn.disabled = false;
+                if (stream) {
+                    stopStream();
+                    stream = null;
                 }
-            }
-        }
-        
-        // 初始化 MediaRecorder
-        function initMediaRecorder() {
-            recordedChunks = [];
-            
-            // 创建 canvas 用于添加叠加文本
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            canvas.width = video.videoWidth || 640;
-            canvas.height = video.videoHeight || 480;
-            
-            // 创建离屏 canvas 流
-            const canvasStream = canvas.captureStream(30); // 30fps
-            
-            // MediaRecorder 配置
-            const options = {
-                mimeType: 'video/webm;codecs=vp9',
-                videoBitsPerSecond: 2500000
-            };
-            
-            // 检查支持的 MIME 类型
-            if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-                options.mimeType = 'video/webm;codecs=vp8';
-            }
-            
-            if (!MediaRecorder.isType_supported(options.mimeType)) {
-                options.mimeType = 'video/webm';
-            }
-            
-            mediaRecorder = new MediaRecorder(canvasStream, options);
-            
-            // 处理录制数据
-            mediaRecorder.ondataavailable = (event) => {
-                if (event.data.size > 0) {
-                    recordedChunks.push(event.data);
-                }
-            };
-            
-            // 开始录制
-            mediaRecorder.start();
-            
-            // 在 canvas 上绘制视频帧和叠加文本
-            function drawFrame() {
-                if (!isCounting && !mediaRecorder.state === 'recording') {
-                    return;
-                }
-                
-                // 绘制视频帧
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                
-                // 添加叠加文本（时间和次数）
-                ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-                ctx.fillRect(10, 10, 200, 50);
-                ctx.fillStyle = 'white';
-                ctx.font = '16px Arial';
-                ctx.fontWeight = 'bold';
-                ctx.fillText(`次数: ${count}`, 20, 30);
-                ctx.fillText(`时间: ${formatTime(elapsedTime)}`, 20, 50);
-                
-                requestAnimationFrame(drawFrame);
-            }
-            
-            drawFrame();
-        }
-        
-        // 格式化时间显示
-        function formatTime(ms) {
-            const minutes = Math.floor(ms / 60000);
-            const seconds = Math.floor((ms % 60000) / 1000);
-            return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-        }
-        
-        // 开始计数
-        function startCounting() {
-            isCounting = true;
-            startBtn.disabled = true;
-            pauseBtn.disabled = false;
-            durationSelect.disabled = true;
-            saveBtn.style.display = 'none';
-            
-            startTime = Date.now();
-            elapsedTime = 0;
-            
-            // 开始运动检测
-            detectMotion();
-            
-            // 开始定时器更新
-            if (timerInterval) {
-                clearInterval(timerInterval);
-            }
-            timerInterval = setInterval(updateDisplay, 100);
-            
-            // 检查是否达到设定时长
-            if (selectedDuration > 0) {
-                setTimeout(() => {
-                    if (isCounting) {
-                        finishWorkout();
-                    }
-                }, selectedDuration * 1000);
             }
         }
         
         // 完成锻炼
         function finishWorkout() {
             pauseCounting();
-            saveBtn.style.display = 'block';
-            alert(`🎉 跳绳完成！\n总次数: ${count}\n平均速度: ${Math.round((count / selectedDuration) * 60)} 次/分钟`);
+            updateStatus('🎉 训练完成！');
+            alert(`跳绳完成！\n总次数: ${count}\n平均速度: ${elapsedTime > 0 ? Math.round((count / elapsedTime) * 60000) : 0} 次/分钟`);
         }
         
         // 暂停计数
@@ -468,6 +346,7 @@
             startBtn.disabled = false;
             pauseBtn.disabled = true;
             durationSelect.disabled = false;
+            updateStatus('⏸️ 已暂停');
             
             if (animationId) {
                 cancelAnimationFrame(animationId);
@@ -479,9 +358,9 @@
                 timerInterval = null;
             }
             
-            // 停止 MediaRecorder
-            if (mediaRecorder && mediaRecorder.state === 'recording') {
-                mediaRecorder.stop();
+            if (countdownTimeout) {
+                clearTimeout(countdownTimeout);
+                countdownTimeout = null;
             }
         }
         
@@ -492,22 +371,12 @@
             startTime = null;
             elapsedTime = 0;
             lastFrame = null;
-            startBtn.disabled = false;
-            pauseBtn.disabled = true;
-            durationSelect.disabled = false;
-            saveBtn.style.display = 'none';
             updateDisplay();
+            updateStatus('准备就绪');
             
-            // 停止摄像头流
             if (stream) {
                 stopStream();
                 stream = null;
-            }
-            
-            // 重置录制数据
-            recordedChunks = [];
-            if (mediaRecorder) {
-                mediaRecorder = null;
             }
         }
         
@@ -524,7 +393,6 @@
             if (!isCounting) return;
             
             try {
-                // 获取当前视频帧
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');
                 canvas.width = video.videoWidth || 640;
@@ -534,10 +402,7 @@
                 const currentFrame = ctx.getImageData(0, 0, canvas.width, canvas.height);
                 
                 if (lastFrame) {
-                    // 计算帧间差异
                     const diff = calculateFrameDifference(lastFrame, currentFrame);
-                    
-                    // 如果运动超过阈值，增加计数
                     if (diff > motionThreshold) {
                         count++;
                         updateDisplay();
@@ -548,20 +413,20 @@
                 animationId = requestAnimationFrame(detectMotion);
             } catch (error) {
                 console.error('运动检测错误:', error);
-                // 继续检测，避免完全停止
-                animationId = requestAnimationFrame(detectMotion);
+                if (isCounting) {
+                    animationId = requestAnimationFrame(detectMotion);
+                }
             }
         }
         
         // 计算帧间差异
         function calculateFrameDifference(frame1, frame2) {
             let diff = 0;
-            const pixels = Math.min(frame1.data.length, frame2.data.length) / 4; // RGBA
+            const maxLength = Math.min(frame1.data.length, frame2.data.length);
+            const pixels = maxLength / 4;
+            const step = Math.max(1, Math.floor(pixels / 500));
             
-            // 只检查部分像素以提高性能
-            const step = Math.max(1, Math.floor(pixels / 1000));
-            
-            for (let i = 0; i < Math.min(frame1.data.length, frame2.data.length); i += step * 4) {
+            for (let i = 0; i < maxLength; i += step * 4) {
                 const rDiff = Math.abs(frame1.data[i] - frame2.data[i]);
                 const gDiff = Math.abs(frame1.data[i + 1] - frame2.data[i + 1]);
                 const bDiff = Math.abs(frame1.data[i + 2] - frame2.data[i + 2]);
@@ -574,9 +439,7 @@
         // 更新显示
         function updateDisplay() {
             counterDisplay.textContent = count;
-            overlayText.textContent = `次数: ${count} | 时间: ${formatTime(elapsedTime)}`;
             
-            // 更新时间
             if (startTime) {
                 const currentTime = Date.now();
                 elapsedTime = currentTime - startTime;
@@ -587,7 +450,6 @@
                 timeDisplay.textContent = '00:00';
             }
             
-            // 更新速度
             if (elapsedTime > 0) {
                 const speed = Math.round((count / elapsedTime) * 60000);
                 speedDisplay.textContent = speed;
@@ -596,62 +458,19 @@
             }
         }
         
-        // 保存视频
-        function saveVideo() {
-            if (recordedChunks.length === 0) {
-                showError('没有可保存的视频数据。');
-                return;
-            }
-            
-            const blob = new Blob(recordedChunks, { type: 'video/webm' });
-            const url = URL.createObjectURL(blob);
-            
-            // 创建下载链接
-            const a = document.createElement('a');
-            a.style.display = 'none';
-            a.href = url;
-            a.download = `jump-rope-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.webm`;
-            document.body.appendChild(a);
-            a.click();
-            
-            // 清理
-            setTimeout(() => {
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-            }, 100);
-        }
-        
-        // 显示错误信息
-        function showError(message) {
-            errorMessage.textContent = message;
-        }
-        
-        // 隐藏错误信息
-        function hideError() {
-            errorMessage.textContent = '';
+        // 更新状态指示器
+        function updateStatus(message) {
+            statusIndicator.textContent = message;
         }
         
         // 页面加载完成后初始化
         document.addEventListener('DOMContentLoaded', init);
         
-        // 处理页面可见性变化
-        document.addEventListener('visibilitychange', () => {
-            if (document.hidden) {
-                pauseCounting();
-            }
-        });
-        
         // 处理页面卸载
         window.addEventListener('beforeunload', () => {
-            if (stream) {
-                stopStream();
-            }
-            if (timerInterval) {
-                clearInterval(timerInterval);
-            }
-            if (mediaRecorder && mediaRecorder.state === 'recording') {
-                mediaRecorder.stop();
-            }
+            if (stream) stopStream();
+            if (timerInterval) clearInterval(timerInterval);
+            if (countdownTimeout) clearTimeout(countdownTimeout);
         });
     </script>
 </body>
