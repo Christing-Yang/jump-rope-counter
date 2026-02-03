@@ -35,29 +35,13 @@
             height: 100%;
             object-fit: contain;
             background: black;
+            display: none;
         }
         
-        .overlay {
-            position: absolute;
-            top: 20px;
-            left: 0;
-            right: 0;
-            text-align: center;
-            z-index: 10;
-            pointer-events: none;
-        }
-        
-        .counter-display {
-            font-size: 60px;
-            font-weight: bold;
-            text-shadow: 0 4px 8px rgba(0,0,0,0.5);
-            margin-bottom: 10px;
-        }
-        
-        .time-display {
-            font-size: 32px;
-            font-weight: bold;
-            text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+        #canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
         }
         
         .prep-overlay {
@@ -99,19 +83,21 @@
         .duration-selector {
             display: flex;
             justify-content: center;
-            gap: 8px;
+            gap: 12px;
             flex-wrap: wrap;
+            align-items: center;
         }
         
         .duration-btn {
-            padding: 8px 12px;
-            font-size: 14px;
+            padding: 12px 18px;
+            font-size: 16px;
             border: 2px solid rgba(255,255,255,0.3);
-            border-radius: 20px;
+            border-radius: 25px;
             background: transparent;
             color: white;
             cursor: pointer;
             transition: all 0.3s ease;
+            min-width: 80px;
         }
         
         .duration-btn.active {
@@ -120,22 +106,56 @@
             font-weight: bold;
         }
         
+        .custom-duration {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .custom-duration input {
+            padding: 10px 12px;
+            font-size: 16px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 20px;
+            background: transparent;
+            color: white;
+            width: 80px;
+            text-align: center;
+        }
+        
+        .custom-duration button {
+            padding: 10px 16px;
+            font-size: 16px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 20px;
+            background: transparent;
+            color: white;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .custom-duration button.active {
+            background: #4CAF50;
+            border-color: #4CAF50;
+            font-weight: bold;
+        }
+        
         .main-controls {
             display: flex;
             justify-content: center;
-            gap: 20px;
+            gap: 24px;
         }
         
         .control-btn {
-            padding: 16px 28px;
-            font-size: 18px;
+            padding: 20px 34px;
+            font-size: 20px;
             border: none;
-            border-radius: 30px;
+            border-radius: 35px;
             font-weight: bold;
             cursor: pointer;
             transition: all 0.3s ease;
             box-shadow: 0 4px 8px rgba(0,0,0,0.3);
-            min-width: 100px;
+            min-width: 120px;
         }
         
         .start-btn {
@@ -179,23 +199,27 @@
         }
         
         @media (max-width: 480px) {
-            .counter-display {
-                font-size: 48px;
-            }
-            
-            .time-display {
-                font-size: 28px;
-            }
-            
             .control-btn {
-                padding: 14px 24px;
-                font-size: 16px;
-                min-width: 90px;
+                padding: 18px 30px;
+                font-size: 18px;
+                min-width: 110px;
             }
             
             .duration-btn {
-                padding: 6px 10px;
-                font-size: 12px;
+                padding: 10px 16px;
+                font-size: 14px;
+                min-width: 70px;
+            }
+            
+            .custom-duration input {
+                padding: 8px 10px;
+                font-size: 14px;
+                width: 70px;
+            }
+            
+            .custom-duration button {
+                padding: 8px 14px;
+                font-size: 14px;
             }
         }
     </style>
@@ -203,10 +227,7 @@
 <body>
     <div class="camera-container">
         <video id="video" autoplay playsinline muted></video>
-        <div class="overlay">
-            <div class="counter-display" id="counter">0</div>
-            <div class="time-display" id="time">1:00</div>
-        </div>
+        <canvas id="canvas"></canvas>
         <div id="prepOverlay" class="prep-overlay" style="display: none;"></div>
     </div>
     
@@ -217,6 +238,10 @@
             <button class="duration-btn" data-seconds="120">2分钟</button>
             <button class="duration-btn" data-seconds="300">5分钟</button>
             <button class="duration-btn" data-seconds="0">不限</button>
+            <div class="custom-duration">
+                <input type="number" id="customSeconds" min="1" max="3600" placeholder="秒数" value="60">
+                <button id="customBtn">自定义</button>
+            </div>
         </div>
         
         <div class="main-controls">
@@ -230,18 +255,20 @@
     <script>
         // DOM 元素
         const video = document.getElementById('video');
-        const counterDisplay = document.getElementById('counter');
-        const timeDisplay = document.getElementById('time');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
         const startBtn = document.getElementById('startBtn');
         const pauseBtn = document.getElementById('pauseBtn');
         const resetBtn = document.getElementById('resetBtn');
         const saveVideoBtn = document.getElementById('saveVideoBtn');
         const durationSelector = document.getElementById('durationSelector');
         const prepOverlay = document.getElementById('prepOverlay');
+        const customSecondsInput = document.getElementById('customSeconds');
+        const customBtn = document.getElementById('customBtn');
         
         // 状态变量
         let count = 0;
-        let totalDuration = 60; // 默认60秒
+        let totalDuration = 60;
         let remainingTime = 60;
         let isCounting = false;
         let isPaused = false;
@@ -252,12 +279,15 @@
         let motionDetectionInterval = null;
         let lastFrame = null;
         let motionThreshold = 30;
-        let prepTimeout = null;
+        let canvasInterval = null;
+        let showFinalResults = false;
+        let finalCount = 0;
+        let finalAverageSpeed = 0;
         
         // 初始化
         function init() {
             setupEventListeners();
-            updateDisplay();
+            setupCanvas();
             
             // 检查浏览器支持
             if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -284,11 +314,44 @@
                 btn.addEventListener('click', () => {
                     durationButtons.forEach(b => b.classList.remove('active'));
                     btn.classList.add('active');
+                    customBtn.classList.remove('active');
                     totalDuration = parseInt(btn.dataset.seconds);
                     remainingTime = totalDuration;
-                    updateDisplay();
+                    updateCanvas();
                 });
             });
+            
+            // 自定义时间
+            customBtn.addEventListener('click', () => {
+                const customSeconds = parseInt(customSecondsInput.value);
+                if (customSeconds && customSeconds > 0 && customSeconds <= 3600) {
+                    durationButtons.forEach(b => b.classList.remove('active'));
+                    customBtn.classList.add('active');
+                    totalDuration = customSeconds;
+                    remainingTime = customSeconds;
+                    updateCanvas();
+                } else {
+                    alert('请输入1-3600之间的有效秒数');
+                }
+            });
+            
+            // 回车键支持自定义输入
+            customSecondsInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    customBtn.click();
+                }
+            });
+        }
+        
+        // 设置Canvas
+        function setupCanvas() {
+            function resizeCanvas() {
+                canvas.width = canvas.offsetWidth;
+                canvas.height = canvas.offsetHeight;
+            }
+            
+            resizeCanvas();
+            window.addEventListener('resize', resizeCanvas);
         }
         
         // 开始锻炼
@@ -321,17 +384,20 @@
                     isCounting = true;
                     isPaused = false;
                     recordedChunks = [];
+                    showFinalResults = false;
                     
                     // 启动视频录制（如果支持）
                     if (MediaRecorder && MediaRecorder.isTypeSupported('video/mp4')) {
                         try {
-                            mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/mp4' });
+                            // 创建录制流 - 使用Canvas作为源
+                            const canvasStream = canvas.captureStream(30); // 30fps
+                            mediaRecorder = new MediaRecorder(canvasStream, { mimeType: 'video/mp4' });
                             mediaRecorder.ondataavailable = event => {
                                 if (event.data.size > 0) {
                                     recordedChunks.push(event.data);
                                 }
                             };
-                            mediaRecorder.start(1000); // 每秒分块
+                            mediaRecorder.start(1000);
                         } catch (e) {
                             console.warn('视频录制初始化失败:', e);
                             mediaRecorder = null;
@@ -386,14 +452,14 @@
                 let elapsedSeconds = 0;
                 countdownInterval = setInterval(() => {
                     elapsedSeconds++;
-                    updateDisplay(elapsedSeconds);
+                    updateCanvas(elapsedSeconds);
                 }, 1000);
             } else {
                 // 限时模式 - 倒计时
                 remainingTime = totalDuration;
                 countdownInterval = setInterval(() => {
                     remainingTime--;
-                    updateDisplay();
+                    updateCanvas();
                     
                     if (remainingTime <= 0) {
                         finishWorkout();
@@ -403,6 +469,10 @@
             
             // 启动运动检测
             motionDetectionInterval = setInterval(detectMotion, 200);
+            
+            // 启动Canvas绘制
+            if (canvasInterval) clearInterval(canvasInterval);
+            canvasInterval = setInterval(drawCanvas, 100);
         }
         
         // 切换暂停/继续
@@ -417,25 +487,25 @@
                 
                 // 重启倒计时
                 if (totalDuration === 0) {
-                    // 不限时模式
-                    let startTime = Date.now() - (count * 1000); // 简化处理
+                    let startTime = Date.now() - (count * 1000);
                     countdownInterval = setInterval(() => {
                         let elapsed = Math.floor((Date.now() - startTime) / 1000);
-                        updateDisplay(elapsed);
+                        updateCanvas(elapsed);
                     }, 1000);
                 } else {
-                    // 限时模式
                     countdownInterval = setInterval(() => {
                         remainingTime--;
-                        updateDisplay();
+                        updateCanvas();
                         if (remainingTime <= 0) {
                             finishWorkout();
                         }
                     }, 1000);
                 }
                 
-                // 重启运动检测
+                // 重启运动检测和Canvas绘制
                 motionDetectionInterval = setInterval(detectMotion, 200);
+                if (canvasInterval) clearInterval(canvasInterval);
+                canvasInterval = setInterval(drawCanvas, 100);
                 
             } else {
                 // 暂停
@@ -443,9 +513,10 @@
                 pauseBtn.textContent = '继续';
                 pauseBtn.className = 'control-btn continue-btn';
                 
-                // 停止倒计时和运动检测
+                // 停止倒计时、运动检测和Canvas绘制
                 if (countdownInterval) clearInterval(countdownInterval);
                 if (motionDetectionInterval) clearInterval(motionDetectionInterval);
+                if (canvasInterval) clearInterval(canvasInterval);
             }
         }
         
@@ -453,9 +524,16 @@
         function finishWorkout() {
             isCounting = false;
             isPaused = false;
+            showFinalResults = true;
+            finalCount = count;
+            finalAverageSpeed = totalDuration > 0 ? Math.round((count / totalDuration) * 60) : 'N/A';
             
             if (countdownInterval) clearInterval(countdownInterval);
             if (motionDetectionInterval) clearInterval(motionDetectionInterval);
+            if (canvasInterval) clearInterval(canvasInterval);
+            
+            // 立即更新Canvas显示最终结果
+            drawCanvas();
             
             // 更新UI
             startBtn.disabled = false;
@@ -475,7 +553,7 @@
             
             // 显示完成提示
             setTimeout(() => {
-                alert(`🎉 跳绳完成！\n总次数: ${count}\n平均速度: ${totalDuration > 0 ? Math.round((count / totalDuration) * 60) : 'N/A'} 次/分钟`);
+                alert(`🎉 跳绳完成！\n总次数: ${count}\n平均速度: ${finalAverageSpeed} 次/分钟`);
             }, 100);
         }
         
@@ -483,10 +561,11 @@
         function resetCounter() {
             if (countdownInterval) clearInterval(countdownInterval);
             if (motionDetectionInterval) clearInterval(motionDetectionInterval);
-            if (prepTimeout) clearTimeout(prepTimeout);
+            if (canvasInterval) clearInterval(canvasInterval);
             
             isCounting = false;
             isPaused = false;
+            showFinalResults = false;
             count = 0;
             remainingTime = totalDuration;
             
@@ -497,7 +576,7 @@
             pauseBtn.className = 'control-btn pause-btn';
             saveVideoBtn.style.display = 'none';
             
-            updateDisplay();
+            updateCanvas();
             
             // 清理资源
             cleanup();
@@ -521,19 +600,19 @@
             if (!isCounting || isPaused) return;
             
             try {
-                const canvas = document.createElement('canvas');
-                const ctx = canvas.getContext('2d');
-                canvas.width = video.videoWidth || 640;
-                canvas.height = video.videoHeight || 480;
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                const tempCanvas = document.createElement('canvas');
+                const tempCtx = tempCanvas.getContext('2d');
+                tempCanvas.width = video.videoWidth || 640;
+                tempCanvas.height = video.videoHeight || 480;
+                tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
                 
-                const currentFrame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const currentFrame = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
                 
                 if (lastFrame) {
                     const diff = calculateFrameDifference(lastFrame, currentFrame);
                     if (diff > motionThreshold) {
                         count++;
-                        updateDisplay();
+                        updateCanvas();
                     }
                 }
                 
@@ -560,31 +639,66 @@
             return diff / (pixels / step);
         }
         
-        // 更新显示
-        function updateDisplay(elapsedSeconds = null) {
-            counterDisplay.textContent = count;
+        // 更新Canvas显示
+        function updateCanvas(elapsedSeconds = null) {
+            // 触发Canvas重绘
+            drawCanvas();
+        }
+        
+        // 绘制Canvas
+        function drawCanvas() {
+            if (!video.videoWidth || !video.videoHeight) return;
             
-            if (elapsedSeconds !== null) {
+            // 绘制视频帧
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            // 添加半透明背景
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+            ctx.fillRect(0, 0, canvas.width, 120);
+            
+            // 绘制跳绳次数
+            ctx.font = 'bold 60px Arial';
+            ctx.fillStyle = 'white';
+            ctx.textAlign = 'center';
+            ctx.fillText(`跳绳: ${count}`, canvas.width / 2, 60);
+            
+            // 绘制时间信息
+            ctx.font = 'bold 32px Arial';
+            if (showFinalResults) {
+                // 显示最终结果
+                ctx.fillText(`最终成绩: ${finalCount} 次`, canvas.width / 2, 100);
+            } else if (elapsedSecondsForDisplay !== undefined) {
                 // 不限时模式
-                const minutes = Math.floor(elapsedSeconds / 60);
-                const seconds = elapsedSeconds % 60;
-                timeDisplay.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                const minutes = Math.floor(elapsedSecondsForDisplay / 60);
+                const seconds = elapsedSecondsForDisplay % 60;
+                ctx.fillText(`时间: ${minutes}:${seconds.toString().padStart(2, '0')}`, canvas.width / 2, 100);
             } else if (totalDuration === 0) {
-                // 不限时模式，显示正向计时
-                timeDisplay.textContent = '0:00';
+                ctx.fillText('时间: 0:00', canvas.width / 2, 100);
             } else {
-                // 限时模式，显示倒计时
+                // 限时模式 - 倒计时
                 if (remainingTime <= 0) {
-                    timeDisplay.textContent = '0:00';
+                    ctx.fillText('时间: 0:00', canvas.width / 2, 100);
                 } else if (remainingTime < 60) {
-                    timeDisplay.textContent = remainingTime.toString();
+                    ctx.fillText(`倒计时: ${remainingTime}`, canvas.width / 2, 100);
                 } else {
                     const minutes = Math.floor(remainingTime / 60);
                     const seconds = remainingTime % 60;
-                    timeDisplay.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                    ctx.fillText(`倒计时: ${minutes}:${seconds.toString().padStart(2, '0')}`, canvas.width / 2, 100);
                 }
             }
+            
+            // 如果是最终结果显示，持续显示在底部
+            if (showFinalResults) {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                ctx.fillRect(0, canvas.height - 80, canvas.width, 80);
+                ctx.font = 'bold 24px Arial';
+                ctx.fillStyle = 'white';
+                ctx.fillText(`总次数: ${finalCount} 次 | 平均速度: ${finalAverageSpeed} 次/分钟`, canvas.width / 2, canvas.height - 30);
+            }
         }
+        
+        // 用于Canvas绘制的全局变量
+        let elapsedSecondsForDisplay = null;
         
         // 保存视频
         function saveVideo() {
