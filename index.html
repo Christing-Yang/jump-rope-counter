@@ -19,7 +19,7 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            padding: 20px;
+            padding: 10px;
             color: white;
         }
         
@@ -30,94 +30,97 @@
         }
         
         h1 {
-            font-size: 28px;
-            margin-bottom: 20px;
+            font-size: 24px;
+            margin-bottom: 15px;
             text-shadow: 0 2px 4px rgba(0,0,0,0.3);
         }
         
         .duration-selector {
-            margin: 15px 0;
-            padding: 10px;
+            margin: 10px 0;
+            padding: 8px;
             background: rgba(255,255,255,0.1);
-            border-radius: 10px;
+            border-radius: 8px;
         }
         
         .duration-selector label {
             display: block;
-            margin-bottom: 8px;
-            font-size: 16px;
+            margin-bottom: 6px;
+            font-size: 14px;
         }
         
         .duration-selector select {
-            padding: 8px 12px;
-            font-size: 16px;
+            padding: 6px 10px;
+            font-size: 14px;
             border: none;
-            border-radius: 8px;
+            border-radius: 6px;
             background: white;
             color: #667eea;
             font-weight: bold;
+            width: 100%;
             appearance: none;
             background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
             background-repeat: no-repeat;
-            background-position: right 10px center;
-            background-size: 16px;
-            padding-right: 30px;
+            background-position: right 8px center;
+            background-size: 12px;
+            padding-right: 25px;
         }
         
         .counter-display {
-            font-size: 80px;
+            font-size: 60px;
             font-weight: bold;
-            margin: 20px 0;
+            margin: 15px 0;
             text-shadow: 0 4px 8px rgba(0,0,0,0.3);
         }
         
         .stats {
             display: flex;
             justify-content: space-around;
-            margin: 20px 0;
-            font-size: 16px;
+            margin: 15px 0;
+            font-size: 14px;
         }
         
         .camera-container {
             width: 100%;
-            height: 300px;
+            height: 400px; /* 增加高度以显示全身 */
             background: rgba(0,0,0,0.3);
-            border-radius: 15px;
+            border-radius: 12px;
             overflow: hidden;
-            margin: 20px 0;
+            margin: 15px 0;
             position: relative;
         }
         
         #video {
             width: 100%;
             height: 100%;
-            object-fit: cover;
+            object-fit: contain; /* 改为contain以完整显示画面 */
             transform: scaleX(-1); /* 镜像效果 */
+            background: black;
         }
         
         .controls {
             display: flex;
             justify-content: center;
-            gap: 15px;
-            margin-top: 20px;
+            gap: 12px;
+            margin-top: 15px;
+            flex-wrap: wrap;
         }
         
         button {
-            padding: 12px 24px;
-            font-size: 16px;
+            padding: 10px 20px;
+            font-size: 14px;
             border: none;
-            border-radius: 25px;
+            border-radius: 20px;
             background: white;
             color: #667eea;
             font-weight: bold;
             cursor: pointer;
             transition: all 0.3s ease;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            box-shadow: 0 3px 6px rgba(0,0,0,0.2);
         }
         
         button:hover {
             transform: translateY(-2px);
-            box-shadow: 0 6px 12px rgba(0,0,0,0.3);
+            box-shadow: 0 5px 10px rgba(0,0,0,0.3);
         }
         
         button:active {
@@ -140,35 +143,41 @@
         }
         
         .instructions {
-            margin-top: 20px;
-            font-size: 14px;
-            line-height: 1.5;
+            margin-top: 15px;
+            font-size: 12px;
+            line-height: 1.4;
             background: rgba(255,255,255,0.1);
-            padding: 15px;
-            border-radius: 10px;
+            padding: 12px;
+            border-radius: 8px;
         }
         
         .status-indicator {
-            margin-top: 10px;
-            font-size: 14px;
+            margin-top: 8px;
+            font-size: 12px;
             color: #ffeb3b;
         }
         
         @media (max-width: 480px) {
             .counter-display {
-                font-size: 60px;
+                font-size: 50px;
             }
             
             h1 {
-                font-size: 24px;
+                font-size: 20px;
             }
             
             .camera-container {
-                height: 250px;
+                height: 350px; /* 在小屏幕上稍小一些 */
             }
             
-            .duration-selector select {
-                width: 100%;
+            .stats {
+                font-size: 12px;
+            }
+        }
+        
+        @media (max-height: 600px) {
+            .camera-container {
+                height: 300px; /* 在屏幕较短的设备上 */
             }
         }
     </style>
@@ -211,7 +220,7 @@
         <div class="instructions">
             <p>💡 使用说明：</p>
             <p>1. 点击"开始"并允许摄像头访问</p>
-            <p>2. 将手机固定在稳定位置</p>
+            <p>2. 将手机固定在稳定位置，确保能看到全身</p>
             <p>3. 确保光线充足，身体在画面中清晰可见</p>
             <p>4. 开始跳绳，系统会自动计数！</p>
         </div>
@@ -279,7 +288,7 @@
                 // 请求摄像头权限
                 stream = await navigator.mediaDevices.getUserMedia({
                     video: { 
-                        facingMode: 'user',
+                        facingMode: 'environment', // 使用后置摄像头看全身
                         width: { ideal: 640 },
                         height: { ideal: 480 }
                     },
