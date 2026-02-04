@@ -140,6 +140,31 @@
             font-weight: bold;
         }
         
+        .settings-section {
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-top: 10px;
+        }
+        
+        .settings-label {
+            font-size: 14px;
+            color: rgba(255,255,255,0.8);
+        }
+        
+        .settings-input {
+            padding: 8px 12px;
+            font-size: 14px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 20px;
+            background: transparent;
+            color: white;
+            width: 80px;
+            text-align: center;
+        }
+        
         .main-controls {
             display: flex;
             justify-content: center;
@@ -211,7 +236,8 @@
                 min-width: 70px;
             }
             
-            .custom-duration input {
+            .custom-duration input,
+            .settings-input {
                 padding: 8px 10px;
                 font-size: 14px;
                 width: 70px;
@@ -244,6 +270,13 @@
             </div>
         </div>
         
+        <div class="settings-section">
+            <span class="settings-label">运动检测阈值:</span>
+            <input type="number" id="thresholdInput" class="settings-input" min="0.01" max="1.0" step="0.01" value="0.15" title="数值越小越敏感，越大越不敏感">
+            <span class="settings-label">最小间隔(ms):</span>
+            <input type="number" id="minIntervalInput" class="settings-input" min="100" max="2000" step="50" value="300" title="两次跳绳间的最小时间间隔">
+        </div>
+        
         <div class="main-controls">
             <button id="startBtn" class="control-btn start-btn">开始</button>
             <button id="pauseBtn" class="control-btn pause-btn">暂停</button>
@@ -265,6 +298,8 @@
         const prepOverlay = document.getElementById('prepOverlay');
         const customSecondsInput = document.getElementById('customSeconds');
         const customBtn = document.getElementById('customBtn');
+        const thresholdInput = document.getElementById('thresholdInput');
+        const minIntervalInput = document.getElementById('minIntervalInput');
         
         // 状态变量
         let count = 0;
@@ -283,10 +318,10 @@
         let finalCount = 0;
         let finalAverageSpeed = 0;
         
-        // 跳绳检测参数
+        // 跳绳检测参数 - 现在可以从UI配置
         let jumpHistory = []; // 存储最近的运动强度
-        let jumpThreshold = 0.15; // 跳绳检测阈值
-        let minJumpInterval = 300; // 最小跳绳间隔（毫秒）
+        let jumpThreshold = parseFloat(thresholdInput.value); // 跳绳检测阈值
+        let minJumpInterval = parseInt(minIntervalInput.value); // 最小跳绳间隔（毫秒）
         let lastJumpTime = 0;
         let motionSensitivity = 0.8; // 运动敏感度
         
@@ -347,6 +382,22 @@
                     customBtn.click();
                 }
             });
+            
+            // 阈值输入变化监听
+            thresholdInput.addEventListener('change', () => {
+                jumpThreshold = parseFloat(thresholdInput.value);
+                if (jumpThreshold < 0.01) jumpThreshold = 0.01;
+                if (jumpThreshold > 1.0) jumpThreshold = 1.0;
+                thresholdInput.value = jumpThreshold.toFixed(2);
+            });
+            
+            // 最小间隔输入变化监听
+            minIntervalInput.addEventListener('change', () => {
+                minJumpInterval = parseInt(minIntervalInput.value);
+                if (minJumpInterval < 100) minJumpInterval = 100;
+                if (minJumpInterval > 2000) minJumpInterval = 2000;
+                minIntervalInput.value = minJumpInterval;
+            });
         }
         
         // 设置Canvas
@@ -381,6 +432,7 @@
                     });
                     
                     video.srcObject = stream;
+                    video.style.display = 'block';
                     
                     // 等待视频加载
                     await new Promise((resolve) => {
@@ -458,6 +510,9 @@
         
         // 开始正式倒计时
         function startCountdown() {
+            // 清除任何现有的倒计时
+            if (countdownInterval) clearInterval(countdownInterval);
+            
             if (totalDuration === 0) {
                 // 不限时模式 - 正向计时
                 let elapsedSeconds = 0;
@@ -466,7 +521,7 @@
                     updateCanvas(elapsedSeconds);
                 }, 1000);
             } else {
-                // 限时模式 - 倒计时
+                // 限时模式 - 倒计时（确保倒计时正常工作）
                 remainingTime = totalDuration;
                 countdownInterval = setInterval(() => {
                     remainingTime--;
@@ -479,6 +534,7 @@
             }
             
             // 启动运动检测
+            if (motionDetectionInterval) clearInterval(motionDetectionInterval);
             motionDetectionInterval = setInterval(detectJumpMotion, 100); // 更频繁的检测
             
             // 启动Canvas绘制
@@ -504,6 +560,7 @@
                         updateCanvas(elapsed);
                     }, 1000);
                 } else {
+                    // 修复：确保倒计时从正确的剩余时间开始
                     countdownInterval = setInterval(() => {
                         remainingTime--;
                         updateCanvas();
@@ -514,6 +571,7 @@
                 }
                 
                 // 重启运动检测和Canvas绘制
+                if (motionDetectionInterval) clearInterval(motionDetectionInterval);
                 motionDetectionInterval = setInterval(detectJumpMotion, 100);
                 if (canvasInterval) clearInterval(canvasInterval);
                 canvasInterval = setInterval(drawCanvas, 100);
@@ -751,7 +809,7 @@
             } else if (totalDuration === 0) {
                 ctx.fillText('时间: 0:00', displayWidth / 2, 100);
             } else {
-                // 限时模式 - 倒计时
+                // 限时模式 - 倒计时（修复：确保正确显示倒计时）
                 if (remainingTime <= 0) {
                     ctx.fillText('时间: 0:00', displayWidth / 2, 100);
                 } else if (remainingTime < 60) {
